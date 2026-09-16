@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  AreaChart, Area 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area
 } from 'recharts';
-import { 
-  Dumbbell, TrendingUp, Plus, Trash2, Calendar, Target, 
+import {
+  Dumbbell, TrendingUp, Plus, Trash2, Calendar, Target,
   Activity, ChevronDown, ChevronUp, Scale, Ruler, LogOut, User,
-  Download, Upload, FileJson, Check
+  Download, Upload, FileJson, Check, X
 } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { supabase } from './supabaseClient';
@@ -19,8 +19,10 @@ interface BodyMeasurement {
   chest: number;
   waist: number;
   hips: number;
-  arms: number;
-  thighs: number;
+  left_arm: number;
+  right_arm: number;
+  left_thigh: number;
+  right_thigh: number;
 }
 
 interface ExerciseRecord {
@@ -32,9 +34,16 @@ interface ExerciseRecord {
   sets: number;
 }
 
-// Helper functions
-const generateId = () => Math.random().toString(36).substr(2, 9);
+interface ExerciseDraft {
+  exercise: string;
+  customExercise: string;
+  useCustom: boolean;
+  weight: string;
+  reps: string;
+  sets: string;
+}
 
+// Helper functions
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr);
   return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
@@ -61,7 +70,20 @@ const exercisePresets = [
   'Гиперэкстензия',
   'Планка',
   'Скручивания',
+  'Жим гантелей сидя',
+  'Тяга гантели в наклоне',
+  'Отжимания',
+  'Болгарские выпады',
 ];
+
+const createEmptyDraft = (): ExerciseDraft => ({
+  exercise: exercisePresets[0],
+  customExercise: '',
+  useCustom: false,
+  weight: '',
+  reps: '',
+  sets: '',
+});
 
 export default function App() {
   const { user, logout } = useAuth();
@@ -70,7 +92,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'body' | 'exercises' | 'progress'>('body');
   const [bodyMeasurements, setBodyMeasurements] = useState<BodyMeasurement[]>([]);
   const [exerciseRecords, setExerciseRecords] = useState<ExerciseRecord[]>([]);
-  const [dataLoaded, setDataLoaded] = useState(false);
 
   // Body measurement form
   const [bodyForm, setBodyForm] = useState({
@@ -79,27 +100,22 @@ export default function App() {
     chest: '',
     waist: '',
     hips: '',
-    arms: '',
-    thighs: '',
+    left_arm: '',
+    right_arm: '',
+    left_thigh: '',
+    right_thigh: '',
   });
 
-  // Exercise form
-  const [exerciseForm, setExerciseForm] = useState({
-    exercise: exercisePresets[0],
-    customExercise: '',
-    date: new Date().toISOString().split('T')[0],
-    weight: '',
-    reps: '',
-    sets: '',
-  });
-  const [useCustomExercise, setUseCustomExercise] = useState(false);
+  // Exercise form - multiple exercises per session
+  const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exerciseDrafts, setExerciseDrafts] = useState<ExerciseDraft[]>([createEmptyDraft()]);
 
   // Expanded records
   const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
 
   // Show user menu
   const [showUserMenu, setShowUserMenu] = useState(false);
-  
+
   // Export/Import modals
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -112,7 +128,6 @@ export default function App() {
     if (!userId || userId === 'default') return;
 
     const loadData = async () => {
-      // Load body measurements
       const { data: bodyData } = await supabase
         .from('body_measurements')
         .select('*')
@@ -127,12 +142,13 @@ export default function App() {
           chest: m.chest || 0,
           waist: m.waist || 0,
           hips: m.hips || 0,
-          arms: m.arms || 0,
-          thighs: m.thighs || 0,
+          left_arm: m.left_arm || 0,
+          right_arm: m.right_arm || 0,
+          left_thigh: m.left_thigh || 0,
+          right_thigh: m.right_thigh || 0,
         })));
       }
 
-      // Load exercise records
       const { data: exerciseData } = await supabase
         .from('exercise_records')
         .select('*')
@@ -149,8 +165,6 @@ export default function App() {
           sets: r.sets || 1,
         })));
       }
-
-      setDataLoaded(true);
     };
 
     loadData();
@@ -163,11 +177,13 @@ export default function App() {
       user_id: userId,
       date: bodyForm.date,
       weight: parseFloat(bodyForm.weight) || 0,
-      chest: parseFloat(bodyForm.chest) || 0,
-      waist: parseFloat(bodyForm.waist) || 0,
-      hips: parseFloat(bodyForm.hips) || 0,
-      arms: parseFloat(bodyForm.arms) || 0,
-      thighs: parseFloat(bodyForm.thighs) || 0,
+      chest: parseFloat(bodyForm.chest) || null,
+      waist: parseFloat(bodyForm.waist) || null,
+      hips: parseFloat(bodyForm.hips) || null,
+      left_arm: parseFloat(bodyForm.left_arm) || null,
+      right_arm: parseFloat(bodyForm.right_arm) || null,
+      left_thigh: parseFloat(bodyForm.left_thigh) || null,
+      right_thigh: parseFloat(bodyForm.right_thigh) || null,
     };
 
     const { data, error } = await supabase
@@ -189,8 +205,10 @@ export default function App() {
         chest: data.chest || 0,
         waist: data.waist || 0,
         hips: data.hips || 0,
-        arms: data.arms || 0,
-        thighs: data.thighs || 0,
+        left_arm: data.left_arm || 0,
+        right_arm: data.right_arm || 0,
+        left_thigh: data.left_thigh || 0,
+        right_thigh: data.right_thigh || 0,
       };
       setBodyMeasurements(prev => [...prev, newMeasurement].sort((a, b) => a.date.localeCompare(b.date)));
     }
@@ -201,54 +219,65 @@ export default function App() {
       chest: '',
       waist: '',
       hips: '',
-      arms: '',
-      thighs: '',
+      left_arm: '',
+      right_arm: '',
+      left_thigh: '',
+      right_thigh: '',
     });
   };
 
-  const addExerciseRecord = async () => {
-    if (!exerciseForm.weight || !exerciseForm.reps) return;
-    const exerciseName = useCustomExercise ? exerciseForm.customExercise : exerciseForm.exercise;
-    if (!exerciseName) return;
-    
-    const recordData = {
+  const addExerciseDraft = () => {
+    setExerciseDrafts([...exerciseDrafts, createEmptyDraft()]);
+  };
+
+  const removeExerciseDraft = (index: number) => {
+    if (exerciseDrafts.length === 1) return;
+    setExerciseDrafts(exerciseDrafts.filter((_, i) => i !== index));
+  };
+
+  const updateExerciseDraft = (index: number, field: keyof ExerciseDraft, value: string | boolean) => {
+    setExerciseDrafts(prev => prev.map((d, i) => i === index ? { ...d, [field]: value } : d));
+  };
+
+  const saveSession = async () => {
+    const validDrafts = exerciseDrafts.filter(d => d.weight && d.reps);
+    if (validDrafts.length === 0) return;
+
+    const recordsToInsert = validDrafts.map(d => ({
       user_id: userId,
-      exercise: exerciseName,
-      date: exerciseForm.date,
-      weight: parseFloat(exerciseForm.weight) || 0,
-      reps: parseInt(exerciseForm.reps) || 0,
-      sets: parseInt(exerciseForm.sets) || 1,
-    };
+      exercise: d.useCustom ? d.customExercise : d.exercise,
+      date: sessionDate,
+      weight: parseFloat(d.weight) || 0,
+      reps: parseInt(d.reps) || 0,
+      sets: parseInt(d.sets) || 1,
+    })).filter(r => r.exercise);
+
+    if (recordsToInsert.length === 0) return;
 
     const { data, error } = await supabase
       .from('exercise_records')
-      .insert(recordData)
-      .select()
-      .single();
+      .insert(recordsToInsert)
+      .select();
 
     if (error) {
-      console.error('Error adding exercise record:', error);
+      console.error('Error adding exercise records:', error);
       return;
     }
 
     if (data) {
-      const newRecord: ExerciseRecord = {
-        id: data.id,
-        exercise: data.exercise,
-        date: data.date,
-        weight: data.weight,
-        reps: data.reps,
-        sets: data.sets || 1,
-      };
-      setExerciseRecords(prev => [...prev, newRecord].sort((a, b) => a.date.localeCompare(b.date)));
+      const newRecords: ExerciseRecord[] = data.map(r => ({
+        id: r.id,
+        exercise: r.exercise,
+        date: r.date,
+        weight: r.weight,
+        reps: r.reps,
+        sets: r.sets || 1,
+      }));
+      setExerciseRecords(prev => [...prev, ...newRecords].sort((a, b) => a.date.localeCompare(b.date)));
     }
 
-    setExerciseForm({
-      ...exerciseForm,
-      weight: '',
-      reps: '',
-      sets: '',
-    });
+    // Reset form
+    setExerciseDrafts([createEmptyDraft()]);
   };
 
   const deleteBodyMeasurement = async (id: string) => {
@@ -282,7 +311,7 @@ export default function App() {
   // Export data to JSON file
   const exportData = () => {
     const exportObj = {
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       user: { name: user?.name, email: user?.email },
       bodyMeasurements,
@@ -308,7 +337,7 @@ export default function App() {
     reader.onload = async (e) => {
       try {
         const fileData = JSON.parse(e.target?.result as string);
-        
+
         if (!fileData.bodyMeasurements || !fileData.exerciseRecords) {
           throw new Error('Неверный формат файла');
         }
@@ -316,7 +345,6 @@ export default function App() {
         setImportStatus('success');
         setImportMessage('Загрузка данных...');
 
-        // Insert body measurements to Supabase
         const bodyToInsert = fileData.bodyMeasurements.map((m: BodyMeasurement) => ({
           user_id: userId,
           date: m.date,
@@ -324,15 +352,14 @@ export default function App() {
           chest: m.chest || null,
           waist: m.waist || null,
           hips: m.hips || null,
-          arms: m.arms || null,
-          thighs: m.thighs || null,
+          left_arm: m.left_arm || null,
+          right_arm: m.right_arm || null,
+          left_thigh: m.left_thigh || null,
+          right_thigh: m.right_thigh || null,
         }));
 
-        const { error: bodyError } = await supabase
-          .from('body_measurements')
-          .insert(bodyToInsert);
+        await supabase.from('body_measurements').insert(bodyToInsert);
 
-        // Insert exercise records to Supabase
         const exercisesToInsert = fileData.exerciseRecords.map((r: ExerciseRecord) => ({
           user_id: userId,
           exercise: r.exercise,
@@ -342,13 +369,7 @@ export default function App() {
           sets: r.sets || 1,
         }));
 
-        const { error: exerciseError } = await supabase
-          .from('exercise_records')
-          .insert(exercisesToInsert);
-
-        if (bodyError || exerciseError) {
-          throw new Error('Ошибка загрузки в облако');
-        }
+        await supabase.from('exercise_records').insert(exercisesToInsert);
 
         // Reload data
         const { data: bodyData } = await supabase
@@ -371,8 +392,10 @@ export default function App() {
             chest: m.chest || 0,
             waist: m.waist || 0,
             hips: m.hips || 0,
-            arms: m.arms || 0,
-            thighs: m.thighs || 0,
+            left_arm: m.left_arm || 0,
+            right_arm: m.right_arm || 0,
+            left_thigh: m.left_thigh || 0,
+            right_thigh: m.right_thigh || 0,
           })));
         }
 
@@ -425,8 +448,10 @@ export default function App() {
     chest: m.chest || undefined,
     waist: m.waist || undefined,
     hips: m.hips || undefined,
-    arms: m.arms || undefined,
-    thighs: m.thighs || undefined,
+    left_arm: m.left_arm || undefined,
+    right_arm: m.right_arm || undefined,
+    left_thigh: m.left_thigh || undefined,
+    right_thigh: m.right_thigh || undefined,
   }));
 
   // Calculate stats
@@ -607,13 +632,12 @@ export default function App() {
       {/* Body Measurements Tab */}
       {activeTab === 'body' && (
         <div className="space-y-6">
-          {/* Add measurement form */}
           <div className="bg-[var(--color-surface)] rounded-2xl p-5 border border-purple-500/20">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-purple-400" />
               Новый замер
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
               <div>
                 <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Дата</label>
                 <input
@@ -667,29 +691,66 @@ export default function App() {
                   className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
                 />
               </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Руки (см)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="30"
-                  value={bodyForm.arms}
-                  onChange={e => setBodyForm({ ...bodyForm, arms: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Ноги (см)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="55"
-                  value={bodyForm.thighs}
-                  onChange={e => setBodyForm({ ...bodyForm, thighs: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                />
+            </div>
+
+            {/* Arms section */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-purple-400 mb-2">🦾 Руки (см)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Левая рука</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="30"
+                    value={bodyForm.left_arm}
+                    onChange={e => setBodyForm({ ...bodyForm, left_arm: e.target.value })}
+                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Правая рука</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="30"
+                    value={bodyForm.right_arm}
+                    onChange={e => setBodyForm({ ...bodyForm, right_arm: e.target.value })}
+                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                  />
+                </div>
               </div>
             </div>
+
+            {/* Legs section */}
+            <div className="mb-4">
+              <p className="text-xs font-medium text-purple-400 mb-2">🦵 Ноги (см)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Левая нога</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="55"
+                    value={bodyForm.left_thigh}
+                    onChange={e => setBodyForm({ ...bodyForm, left_thigh: e.target.value })}
+                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Правая нога</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="55"
+                    value={bodyForm.right_thigh}
+                    onChange={e => setBodyForm({ ...bodyForm, right_thigh: e.target.value })}
+                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                  />
+                </div>
+              </div>
+            </div>
+
             <button
               onClick={addBodyMeasurement}
               className="w-full md:w-auto bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium py-2.5 px-6 rounded-lg transition-all shadow-lg shadow-purple-500/25"
@@ -717,15 +778,6 @@ export default function App() {
                       }}
                     />
                     <Area type="monotone" dataKey="weight" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.2} name="Вес (кг)" />
-                    {bodyChartData.some(d => d.chest) && (
-                      <Area type="monotone" dataKey="chest" stroke="#f472b6" fill="#f472b6" fillOpacity={0.1} name="Грудь (см)" />
-                    )}
-                    {bodyChartData.some(d => d.waist) && (
-                      <Area type="monotone" dataKey="waist" stroke="#60a5fa" fill="#60a5fa" fillOpacity={0.1} name="Талия (см)" />
-                    )}
-                    {bodyChartData.some(d => d.hips) && (
-                      <Area type="monotone" dataKey="hips" stroke="#34d399" fill="#34d399" fillOpacity={0.1} name="Бёдра (см)" />
-                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -748,8 +800,10 @@ export default function App() {
                       <th className="text-center py-2 px-2">Грудь</th>
                       <th className="text-center py-2 px-2">Талия</th>
                       <th className="text-center py-2 px-2">Бёдра</th>
-                      <th className="text-center py-2 px-2">Руки</th>
-                      <th className="text-center py-2 px-2">Ноги</th>
+                      <th className="text-center py-2 px-2">Л.Р.</th>
+                      <th className="text-center py-2 px-2">П.Р.</th>
+                      <th className="text-center py-2 px-2">Л.Н.</th>
+                      <th className="text-center py-2 px-2">П.Н.</th>
                       <th className="py-2 px-2"></th>
                     </tr>
                   </thead>
@@ -761,8 +815,10 @@ export default function App() {
                         <td className="text-center py-2.5 px-2">{m.chest || '—'}</td>
                         <td className="text-center py-2.5 px-2">{m.waist || '—'}</td>
                         <td className="text-center py-2.5 px-2">{m.hips || '—'}</td>
-                        <td className="text-center py-2.5 px-2">{m.arms || '—'}</td>
-                        <td className="text-center py-2.5 px-2">{m.thighs || '—'}</td>
+                        <td className="text-center py-2.5 px-2">{m.left_arm || '—'}</td>
+                        <td className="text-center py-2.5 px-2">{m.right_arm || '—'}</td>
+                        <td className="text-center py-2.5 px-2">{m.left_thigh || '—'}</td>
+                        <td className="text-center py-2.5 px-2">{m.right_thigh || '—'}</td>
                         <td className="py-2.5 px-2">
                           <button
                             onClick={() => deleteBodyMeasurement(m.id)}
@@ -776,6 +832,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-[var(--color-text-muted)] mt-2">Л.Р. = Левая рука • П.Р. = Правая рука • Л.Н. = Левая нога • П.Н. = Правая нога</p>
             </div>
           )}
 
@@ -792,88 +849,118 @@ export default function App() {
       {/* Exercises Tab */}
       {activeTab === 'exercises' && (
         <div className="space-y-6">
-          {/* Add exercise form */}
+          {/* Multi-exercise session form */}
           <div className="bg-[var(--color-surface)] rounded-2xl p-5 border border-purple-500/20">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-purple-400" />
               Новая тренировка
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-              <div className="col-span-2 md:col-span-1">
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Упражнение</label>
-                {!useCustomExercise ? (
-                  <select
-                    value={exerciseForm.exercise}
-                    onChange={e => setExerciseForm({ ...exerciseForm, exercise: e.target.value })}
-                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-400"
-                  >
-                    {exercisePresets.map(ex => (
-                      <option key={ex} value={ex}>{ex}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    placeholder="Название упражнения"
-                    value={exerciseForm.customExercise}
-                    onChange={e => setExerciseForm({ ...exerciseForm, customExercise: e.target.value })}
-                    className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                  />
-                )}
-                <button
-                  onClick={() => setUseCustomExercise(!useCustomExercise)}
-                  className="text-xs text-purple-400 mt-1 hover:text-purple-300"
-                >
-                  {useCustomExercise ? '← Выбрать из списка' : '✏️ Своё название'}
-                </button>
-              </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Дата</label>
-                <input
-                  type="date"
-                  value={exerciseForm.date}
-                  onChange={e => setExerciseForm({ ...exerciseForm, date: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Вес (кг) *</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="50"
-                  value={exerciseForm.weight}
-                  onChange={e => setExerciseForm({ ...exerciseForm, weight: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Повторения *</label>
-                <input
-                  type="number"
-                  placeholder="12"
-                  value={exerciseForm.reps}
-                  onChange={e => setExerciseForm({ ...exerciseForm, reps: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Подходы</label>
-                <input
-                  type="number"
-                  placeholder="3"
-                  value={exerciseForm.sets}
-                  onChange={e => setExerciseForm({ ...exerciseForm, sets: e.target.value })}
-                  className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
-                />
-              </div>
+
+            <div className="mb-4">
+              <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Дата тренировки</label>
+              <input
+                type="date"
+                value={sessionDate}
+                onChange={e => setSessionDate(e.target.value)}
+                className="w-full md:w-64 bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-400"
+              />
             </div>
-            <button
-              onClick={addExerciseRecord}
-              className="w-full md:w-auto bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium py-2.5 px-6 rounded-lg transition-all shadow-lg shadow-purple-500/25"
-            >
-              Записать результат
-            </button>
+
+            {/* Exercise drafts */}
+            <div className="space-y-3 mb-4">
+              {exerciseDrafts.map((draft, index) => (
+                <div key={index} className="bg-[var(--color-surface-light)]/50 rounded-xl p-4 border border-purple-500/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-medium text-purple-400">Упражнение #{index + 1}</span>
+                    {exerciseDrafts.length > 1 && (
+                      <button
+                        onClick={() => removeExerciseDraft(index)}
+                        className="text-red-400/60 hover:text-red-400 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="col-span-2">
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Название</label>
+                      {!draft.useCustom ? (
+                        <select
+                          value={draft.exercise}
+                          onChange={e => updateExerciseDraft(index, 'exercise', e.target.value)}
+                          className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-400"
+                        >
+                          {exercisePresets.map(ex => (
+                            <option key={ex} value={ex}>{ex}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder="Название"
+                          value={draft.customExercise}
+                          onChange={e => updateExerciseDraft(index, 'customExercise', e.target.value)}
+                          className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                        />
+                      )}
+                      <button
+                        onClick={() => updateExerciseDraft(index, 'useCustom', !draft.useCustom)}
+                        className="text-xs text-purple-400 mt-1 hover:text-purple-300"
+                      >
+                        {draft.useCustom ? '← Из списка' : '✏️ Своё'}
+                      </button>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Вес (кг)</label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        placeholder="50"
+                        value={draft.weight}
+                        onChange={e => updateExerciseDraft(index, 'weight', e.target.value)}
+                        className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Повторы</label>
+                      <input
+                        type="number"
+                        placeholder="12"
+                        value={draft.reps}
+                        onChange={e => updateExerciseDraft(index, 'reps', e.target.value)}
+                        className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-[var(--color-text-muted)] mb-1 block">Подходы</label>
+                      <input
+                        type="number"
+                        placeholder="3"
+                        value={draft.sets}
+                        onChange={e => updateExerciseDraft(index, 'sets', e.target.value)}
+                        className="w-full bg-[var(--color-surface-light)] border border-purple-500/30 rounded-lg px-3 py-2 text-sm text-white placeholder:text-[var(--color-text-muted)]/50 focus:outline-none focus:border-purple-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={addExerciseDraft}
+                className="flex-1 py-2.5 px-4 rounded-lg border border-purple-500/30 text-sm font-medium text-purple-400 hover:bg-purple-500/10 transition-colors flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Добавить упражнение
+              </button>
+              <button
+                onClick={saveSession}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-medium py-2.5 px-6 rounded-lg transition-all shadow-lg shadow-purple-500/25"
+              >
+                Сохранить тренировку ({exerciseDrafts.filter(d => d.weight && d.reps).length})
+              </button>
+            </div>
           </div>
 
           {/* Exercise records grouped */}
@@ -920,10 +1007,9 @@ export default function App() {
                         {isExpanded ? <ChevronUp className="w-5 h-5 text-[var(--color-text-muted)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-muted)]" />}
                       </div>
                     </button>
-                    
+
                     {isExpanded && (
                       <div className="px-4 pb-4">
-                        {/* Mini chart */}
                         {records.length > 1 && (
                           <div className="h-32 mb-4">
                             <ResponsiveContainer width="100%" height="100%">
@@ -945,12 +1031,11 @@ export default function App() {
                             </ResponsiveContainer>
                           </div>
                         )}
-                        
-                        {/* Records list */}
+
                         <div className="space-y-1.5">
                           {records.map(record => (
                             <div key={record.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--color-surface-light)]/50 hover:bg-[var(--color-surface-light)]">
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-xs text-[var(--color-text-muted)] w-16">{formatDate(record.date)}</span>
                                 <span className="font-medium">{record.weight} кг</span>
                                 <span className="text-[var(--color-text-muted)] text-sm">× {record.reps} повт.</span>
@@ -1039,21 +1124,13 @@ export default function App() {
                         color: '#f1f0f5',
                       }}
                     />
-                    {bodyChartData.some(d => d.chest) && (
-                      <Line type="monotone" dataKey="chest" stroke="#f472b6" strokeWidth={2} dot={{ r: 3 }} name="Грудь" />
-                    )}
-                    {bodyChartData.some(d => d.waist) && (
-                      <Line type="monotone" dataKey="waist" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} name="Талия" />
-                    )}
-                    {bodyChartData.some(d => d.hips) && (
-                      <Line type="monotone" dataKey="hips" stroke="#34d399" strokeWidth={2} dot={{ r: 3 }} name="Бёдра" />
-                    )}
-                    {bodyChartData.some(d => d.arms) && (
-                      <Line type="monotone" dataKey="arms" stroke="#fbbf24" strokeWidth={2} dot={{ r: 3 }} name="Руки" />
-                    )}
-                    {bodyChartData.some(d => d.thighs) && (
-                      <Line type="monotone" dataKey="thighs" stroke="#fb923c" strokeWidth={2} dot={{ r: 3 }} name="Ноги" />
-                    )}
+                    {bodyChartData.some(d => d.chest) && <Line type="monotone" dataKey="chest" stroke="#f472b6" strokeWidth={2} dot={{ r: 3 }} name="Грудь" />}
+                    {bodyChartData.some(d => d.waist) && <Line type="monotone" dataKey="waist" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} name="Талия" />}
+                    {bodyChartData.some(d => d.hips) && <Line type="monotone" dataKey="hips" stroke="#34d399" strokeWidth={2} dot={{ r: 3 }} name="Бёдра" />}
+                    {bodyChartData.some(d => d.left_arm) && <Line type="monotone" dataKey="left_arm" stroke="#fbbf24" strokeWidth={2} dot={{ r: 3 }} name="Левая рука" />}
+                    {bodyChartData.some(d => d.right_arm) && <Line type="monotone" dataKey="right_arm" stroke="#fb923c" strokeWidth={2} dot={{ r: 3 }} name="Правая рука" />}
+                    {bodyChartData.some(d => d.left_thigh) && <Line type="monotone" dataKey="left_thigh" stroke="#a78bfa" strokeWidth={2} dot={{ r: 3 }} name="Левая нога" />}
+                    {bodyChartData.some(d => d.right_thigh) && <Line type="monotone" dataKey="right_thigh" stroke="#c084fc" strokeWidth={2} dot={{ r: 3 }} name="Правая нога" />}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1061,8 +1138,10 @@ export default function App() {
                 {bodyChartData.some(d => d.chest) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-pink-400"></span>Грудь</span>}
                 {bodyChartData.some(d => d.waist) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-blue-400"></span>Талия</span>}
                 {bodyChartData.some(d => d.hips) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-green-400"></span>Бёдра</span>}
-                {bodyChartData.some(d => d.arms) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-yellow-400"></span>Руки</span>}
-                {bodyChartData.some(d => d.thighs) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-orange-400"></span>Ноги</span>}
+                {bodyChartData.some(d => d.left_arm) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-yellow-400"></span>Лев. рука</span>}
+                {bodyChartData.some(d => d.right_arm) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-orange-400"></span>Пр. рука</span>}
+                {bodyChartData.some(d => d.left_thigh) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-purple-400"></span>Лев. нога</span>}
+                {bodyChartData.some(d => d.right_thigh) && <span className="flex items-center gap-1.5 text-xs"><span className="w-3 h-3 rounded-full bg-fuchsia-400"></span>Пр. нога</span>}
               </div>
             </div>
           )}
@@ -1071,7 +1150,7 @@ export default function App() {
           {uniqueExercises.map(exercise => {
             const progressData = getExerciseProgress(exercise);
             if (progressData.length < 2) return null;
-            
+
             const firstWeight = progressData[0].weight;
             const lastWeight = progressData[progressData.length - 1].weight;
             const totalProgress = lastWeight - firstWeight;
@@ -1142,7 +1221,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Export Modal */}
+      {/* Modals */}
       {showExportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-[var(--color-surface)] rounded-2xl p-6 max-w-md w-full border border-purple-500/20 shadow-xl">
@@ -1153,26 +1232,13 @@ export default function App() {
               <h3 className="text-lg font-semibold">Экспорт данных</h3>
             </div>
             <p className="text-sm text-[var(--color-text-muted)] mb-4">
-              Скачай файл с твоими данными. Ты сможешь загрузить его на другом устройстве.
+              Скачай файл с твоими данными.
             </p>
-            <div className="bg-[var(--color-surface-light)] rounded-xl p-4 mb-4 text-sm">
-              <p className="text-[var(--color-text-muted)] mb-2">Будут сохранены:</p>
-              <ul className="space-y-1 text-white">
-                <li>• {bodyMeasurements.length} замеров тела</li>
-                <li>• {exerciseRecords.length} записей упражнений</li>
-              </ul>
-            </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="flex-1 py-2.5 px-4 rounded-xl border border-purple-500/30 text-sm font-medium hover:bg-[var(--color-surface-light)] transition-colors"
-              >
+              <button onClick={() => setShowExportModal(false)} className="flex-1 py-2.5 px-4 rounded-xl border border-purple-500/30 text-sm font-medium hover:bg-[var(--color-surface-light)] transition-colors">
                 Отмена
               </button>
-              <button
-                onClick={() => { exportData(); setShowExportModal(false); }}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-sm font-medium shadow-lg shadow-purple-500/25"
-              >
+              <button onClick={() => { exportData(); setShowExportModal(false); }} className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-sm font-medium shadow-lg shadow-purple-500/25">
                 Скачать файл
               </button>
             </div>
@@ -1180,7 +1246,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-[var(--color-surface)] rounded-2xl p-6 max-w-md w-full border border-purple-500/20 shadow-xl">
@@ -1190,24 +1255,14 @@ export default function App() {
               </div>
               <h3 className="text-lg font-semibold">Импорт данных</h3>
             </div>
-            <p className="text-sm text-[var(--color-text-muted)] mb-4">
-              Загрузи файл, который ранее экспортировала. Данные будут добавлены к существующим.
-            </p>
-            
             {importStatus === 'idle' && (
               <label className="block w-full border-2 border-dashed border-purple-500/30 rounded-xl p-8 text-center cursor-pointer hover:border-purple-400/50 transition-colors">
                 <Upload className="w-8 h-8 mx-auto mb-2 text-purple-400" />
                 <p className="text-sm font-medium">Нажми чтобы выбрать файл</p>
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">Формат: .json</p>
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={importData}
-                  className="hidden"
-                />
+                <input type="file" accept=".json" onChange={importData} className="hidden" />
               </label>
             )}
-
             {importStatus === 'success' && (
               <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 text-center">
                 <Check className="w-8 h-8 mx-auto mb-2 text-green-400" />
@@ -1215,25 +1270,19 @@ export default function App() {
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">{importMessage}</p>
               </div>
             )}
-
             {importStatus === 'error' && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-center">
                 <p className="text-sm text-red-400 font-medium">Ошибка</p>
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">{importMessage}</p>
               </div>
             )}
-
-            <button
-              onClick={() => { setShowImportModal(false); setImportStatus('idle'); }}
-              className="w-full mt-4 py-2.5 px-4 rounded-xl border border-purple-500/30 text-sm font-medium hover:bg-[var(--color-surface-light)] transition-colors"
-            >
+            <button onClick={() => { setShowImportModal(false); setImportStatus('idle'); }} className="w-full mt-4 py-2.5 px-4 rounded-xl border border-purple-500/30 text-sm font-medium hover:bg-[var(--color-surface-light)] transition-colors">
               Закрыть
             </button>
           </div>
         </div>
       )}
 
-      {/* Guide Modal */}
       {showGuideModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-[var(--color-surface)] rounded-2xl p-6 max-w-lg w-full border border-purple-500/20 shadow-xl max-h-[85vh] overflow-y-auto">
@@ -1243,61 +1292,39 @@ export default function App() {
               </div>
               <h3 className="text-lg font-semibold">Как пользоваться</h3>
             </div>
-            
             <div className="space-y-4 text-sm">
               <div className="bg-[var(--color-surface-light)] rounded-xl p-4">
                 <h4 className="font-semibold text-purple-400 mb-2">📐 Параметры тела</h4>
                 <p className="text-[var(--color-text-muted)]">
-                  Вноси вес и объёмы (грудь, талия, бёдра, руки, ноги). Можно заполнять не все поля — только то, что ты замеряешь.
+                  Вноси вес и объёмы. Для рук и ног есть отдельные поля для левой и правой стороны — это поможет отследить дисбаланс.
                 </p>
               </div>
-
               <div className="bg-[var(--color-surface-light)] rounded-xl p-4">
                 <h4 className="font-semibold text-purple-400 mb-2">🏋️ Упражнения</h4>
                 <p className="text-[var(--color-text-muted)]">
-                  Записывай рабочие веса, повторения и подходы. Выбирай из списка или пиши своё название. Нажми на упражнение чтобы увидеть график прогресса.
+                  За одну тренировку можно добавить сразу несколько упражнений! Нажми «Добавить упражнение» чтобы добавить ещё одно.
                 </p>
               </div>
-
               <div className="bg-[var(--color-surface-light)] rounded-xl p-4">
                 <h4 className="font-semibold text-purple-400 mb-2">📈 Прогресс</h4>
                 <p className="text-[var(--color-text-muted)]">
-                  Здесь графики динамики веса, объёмов и прогрессии в каждом упражнении. Показывает сколько кг ты добавила с первого раза.
+                  Графики динамики веса, объёмов и прогрессии в каждом упражнении.
                 </p>
               </div>
-
-              <div className="bg-[var(--color-surface-light)] rounded-xl p-4">
-                <h4 className="font-semibold text-purple-400 mb-2">💾 Перенос данных</h4>
-                <p className="text-[var(--color-text-muted)] mb-2">
-                  Данные хранятся в этом браузере. Чтобы перенести на другое устройство:
-                </p>
-                <ol className="list-decimal list-inside space-y-1 text-[var(--color-text-muted)]">
-                  <li>Нажми <span className="text-white">«Экспорт данных»</span> в меню</li>
-                  <li>Скачай JSON файл</li>
-                  <li>На новом устройстве войди в аккаунт</li>
-                  <li>Нажми <span className="text-white">«Импорт данных»</span> и выбери файл</li>
-                </ol>
-              </div>
-
               <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4">
                 <h4 className="font-semibold text-purple-400 mb-2">💡 Совет</h4>
                 <p className="text-[var(--color-text-muted)]">
-                  Делай замеры раз в неделю в одно и то же время (утром натощак). Для упражнений записывай лучший подход с максимальным весом.
+                  Делай замеры раз в неделю в одно и то же время. Для рук и ног замеряй самую широкую часть мышцы.
                 </p>
               </div>
             </div>
-
-            <button
-              onClick={() => setShowGuideModal(false)}
-              className="w-full mt-4 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-sm font-medium shadow-lg shadow-purple-500/25"
-            >
+            <button onClick={() => setShowGuideModal(false)} className="w-full mt-4 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-sm font-medium shadow-lg shadow-purple-500/25">
               Понятно!
             </button>
           </div>
         </div>
       )}
 
-      {/* Footer */}
       <footer className="text-center mt-10 pb-6 text-xs text-[var(--color-text-muted)]">
         <p>☁️ Данные синхронизируются в облаке</p>
       </footer>
